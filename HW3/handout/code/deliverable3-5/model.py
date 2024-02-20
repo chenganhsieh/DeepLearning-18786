@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
@@ -22,12 +22,34 @@ class ResidualBlock(nn.Module):
         ## Define all the layers
         # ----- TODO -----
 
-        raise NotImplementedError
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU()
+        
+        self.downsample = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, stride, bias=False),
+            nn.BatchNorm2d(out_channels)
+        )
 
     def forward(self, x):
-       
-        # ----- TODO -----
-        raise NotImplementedError
+        identity = x
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        
+        out = self.conv2(out)
+        out = self.bn2(out)
+        
+        
+        identity = self.downsample(identity)
+        
+        out += identity
+        out = self.relu(out)
+        
+        return out
 
 
 class MyResnet(nn.Module):
@@ -48,7 +70,18 @@ class MyResnet(nn.Module):
         
         ## Define all the layers
         # ----- TODO -----
-        raise NotImplementedError
+        self.initial = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU()
+        )
+        
+        self.resblock1 = ResidualBlock(64, 128, kernel_size=3, stride=2)
+        self.resblock2 = ResidualBlock(128, 256, kernel_size=3, stride=2)
+        self.resblock3 = ResidualBlock(256, 512, kernel_size=3, stride=2)
+        
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512, num_classes)
 
 
     def forward(self, x, return_embed=False):
@@ -69,7 +102,22 @@ class MyResnet(nn.Module):
         """
 
         # ----- TODO -----
-        raise NotImplementedError
+        x = self.initial(x)
+        x = self.resblock1(x)
+        x = self.resblock2(x)
+        x = self.resblock3(x)
+        
+        # Optional embedding output
+        embedding = x
+        
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        
+        if return_embed:
+            return x, embedding
+        else:
+            return x
 
 
 def init_weights_kaiming(m):
@@ -87,11 +135,14 @@ def init_weights_kaiming(m):
 
     if isinstance(m, nn.Conv2d):
         # ----- TODO -----
-        raise NotImplementedError
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
 
     elif isinstance(m, nn.Linear):
         # ----- TODO -----
-        raise NotImplementedError
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.constant_(m.bias, 0.01)
 
 
 if __name__ == "__main__":

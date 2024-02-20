@@ -36,7 +36,7 @@ class Net(nn.Module):
         ## Define all the layers
         ## Use MyConv2D, MyMaxPool2D for the network
         # ----- TODO -----
-        self.conv1 = MyConv2D(1, 3, 3, 1, 1)
+        self.conv1 = MyConv2D(1, 3, 3, 1, 1) # in_channels, out_channels, kernel_size, stride, padding, bias=True
         self.pool1 = MyMaxPool2D(kernel_size=2, stride=2)
         self.conv2 = MyConv2D(3, 6, 3, 1, 1)
         self.pool2 = MyMaxPool2D(kernel_size=2, stride=2)
@@ -56,7 +56,7 @@ class Net(nn.Module):
         x = self.fc2(x)
         return x
     
-def train(model, device, train_loader, optimizer, criterion):
+def train(model, device, train_loader, optimizer, criterion, epoch):
     model.train()
     total_loss = 0
     correct = 0
@@ -74,10 +74,10 @@ def train(model, device, train_loader, optimizer, criterion):
     
     total_loss /= len(train_loader.dataset)
     accuracy = 100. * correct / len(train_loader.dataset)
-    print(f'Train Epoch: Loss: {total_loss:.4f}, Accuracy: {accuracy:.2f}%')
+    print(f'Train Epoch {epoch}: Loss: {total_loss:.4f}, Accuracy: {accuracy:.2f}%')
     return accuracy, total_loss 
 
-def validate(model, device, validation_loader, criterion):
+def validate(model, device, validation_loader, criterion, epoch):
     model.eval()
     total_loss = 0
     correct = 0
@@ -91,7 +91,7 @@ def validate(model, device, validation_loader, criterion):
     
     total_loss /= len(validation_loader.dataset)
     accuracy = 100. * correct / len(validation_loader.dataset)
-    print(f'Validation: Loss: {total_loss:.4f}, Accuracy: {accuracy:.2f}%')
+    print(f'Validation: Loss {epoch}: {total_loss:.4f}, Accuracy: {accuracy:.2f}% \n')
     return accuracy, total_loss
 
 
@@ -140,8 +140,8 @@ if __name__ == "__main__":
 
     for epoch in range(num_epoch): 
         # ----- TODO -----
-        t_acc, t_loss = train(model, device, trainloader, optimizer, criterion)
-        v_acc, v_loss = validate(model, device, valloader, criterion)
+        t_acc, t_loss = train(model, device, trainloader, optimizer, criterion, epoch)
+        v_acc, v_loss = validate(model, device, valloader, criterion, epoch)
 
         train_losses.append(t_loss)
         val_losses.append(v_loss)
@@ -164,5 +164,5 @@ if __name__ == "__main__":
     plt.title('Accuracy')
 
     plt.show()
-
+    plt.savefig("deliverable2.png")
 
