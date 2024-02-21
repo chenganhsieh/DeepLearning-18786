@@ -42,8 +42,6 @@ def evaluate_attack_success_rate(model, adv_examples, true_labels, target_class=
         
         if len(adv_examples) == 0:
             return 0.0
-    
-
 
     with torch.no_grad():
         outputs = model(adv_examples)
@@ -135,7 +133,7 @@ test(modelB,x_test,y_test,512)
 
 #untargeted attack
 #you may add parameters as you wish
-def untargeted_attack(model, images, labels, epsilon=2, iters=20):
+def untargeted_attack(model, images, labels, epsilon=2, iters=20, alpha = 1.0):
     model.eval()
 
     perturbed_images = images.detach().clone()
@@ -148,7 +146,7 @@ def untargeted_attack(model, images, labels, epsilon=2, iters=20):
         loss.backward()
         sign_data_grad = perturbed_images.grad.sign()
         with torch.no_grad():
-            perturbed_images = perturbed_images + epsilon * sign_data_grad
+            perturbed_images = perturbed_images + alpha * sign_data_grad
             perturbed_images = torch.clamp(perturbed_images, 0, 255)
             perturbed_images = torch.clamp(perturbed_images - images, min=-epsilon, max=epsilon) + images
             perturbed_images = torch.clamp(perturbed_images, 0, 255).detach().clone()
@@ -158,7 +156,7 @@ def untargeted_attack(model, images, labels, epsilon=2, iters=20):
 
 #targeted attack
 #you may add parameters as you wish
-def targeted_attack(model, images, labels, target_class, epsilon=2, iters=100):
+def targeted_attack(model, images, labels, target_class, epsilon=2, iters=100, alpha=1.0):
     model.eval()
     
     mask = labels == 1
@@ -169,66 +167,147 @@ def targeted_attack(model, images, labels, target_class, epsilon=2, iters=100):
     for _ in range(iters):
         perturbed_images.requires_grad = True
         outputs = model(perturbed_images)
-        pred=torch.argmax(outputs,dim=1)
         model.zero_grad()
         loss = F.cross_entropy(outputs, target_labels)
         loss.backward()
 
         sign_data_grad = perturbed_images.grad.data
         with torch.no_grad():
-            perturbed_images = perturbed_images - epsilon * sign_data_grad.sign()
-            perturbed_images = torch.clamp(perturbed_images - images_to_attack, min=-epsilon, max=epsilon) + images_to_attack
+            perturbed_images = perturbed_images - alpha * sign_data_grad.sign()
+            perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon, max=images_to_attack+epsilon)
             perturbed_images = torch.clamp(perturbed_images, 0, 255)
             perturbed_images = perturbed_images.detach().clone()
     
+    perturbed_images.requires_grad = False
     return_images = images.detach().clone()
     return_images[mask] = perturbed_images
     return return_images
          
 #improved targeted attack 
 #you may add parameters as you wish
-def targeted_attack_improved(model, images, labels, target_class, epsilon=0.03, iters=50, decay_factor=1.0):
+def targeted_attack_improved(model, images, labels, target_class, epsilon=0.03, iters=300, alpha=1.0):
     model.eval()
-    perturbed_images = images.detach().clone()
-    target_labels = torch.full_like(labels, target_class)  # Create a tensor of the target class labels
+    mask_1 = labels == 1
+    images_to_attack = images[mask_1].detach().clone()
+    labels_to_attack = labels[mask_1].detach().clone()
+    perturbed_images = images_to_attack.detach().clone()
+    perturbations = []
+    labels = []
+    epsilon_large = 128
+    attack_perturbation = {}
+    for i in range(images_to_attack.shape[0]):
+        print(f"Image:{i}")
+        image = images_to_attack[i]
 
-    m=torch.zeros(perturbed_images.shape)
-    v=torch.zeros(perturbed_images.shape)
-
-    for i in range(iters): # PGD
-        perturbed_images.requires_grad = True
-        outputs = model(perturbed_images)
-        loss = F.cross_entropy(outputs, target_labels)
-        model.zero_grad()
-        loss.backward()
-        grads = perturbed_images.grad
-        with torch.no_grad():
-            t=i+1
-            m=0.9*m+0.1*grads
-            v=0.999*v+0.001*grads*grads
-            mhat=m/(1.0 - 0.9**t)
-            vhat=v/(1.0 - 0.999**t)
-            grads=mhat / (torch.sqrt(vhat) + 1e-8)
-            perturbed_images = perturbed_images - epsilon*grads.sign()
-            perturbed_images = torch.clamp(perturbed_images - images, min=-epsilon, max=epsilon) + images
+        perturbation = torch.zeros((1, images.shape[1], images.shape[2], images.shape[3]), requires_grad=True)
+        optimizer = torch.optim.Adam([perturbation], lr=1)
+        for _ in range(300):
+            optimizer.zero_grad()
+            
+            # Apply perturbations within epsilon constraints
+            perturbed_images = image + perturbation
             perturbed_images = torch.clamp(perturbed_images, 0, 255)
-            perturbed_images = perturbed_images.detach().clone()
+            perturbed_images = torch.clamp(perturbed_images - image, min=-epsilon_large, max=epsilon_large) + image
+            
+            outputs = model(perturbed_images)
+            loss = F.cross_entropy(outputs, torch.tensor([8]))
+            loss.backward()            
+            optimizer.step()
+            label = torch.argmax(outputs).item()
 
-    return perturbed_images
+            # Project the perturbations to ensure they are within the epsilon ball after update
+            perturbation.data = torch.clamp(perturbation, min=-epsilon_large, max=epsilon_large)
+            if label == 8:
+                attack_perturbation[i] = perturbation.detach().clone()
+                break
+    attack_success_amt = len(attack_perturbation)
+    print(f"Epsilon:{epsilon} -> {attack_success_amt}")
+
+    
+    perturbed_images = images_to_attack.detach().clone()
+    for i in range(perturbed_images.shape[0]):
+        print(f"Revise images:{i}")
+        temp_image = perturbed_images[i].detach().clone()
+        if i in attack_perturbation:
+            perturbation = attack_perturbation[i]
+            for _ in range(iters):
+                temp_image = temp_image + perturbation * 0.1
+                temp_image = torch.clamp(temp_image - perturbed_images[i].detach().clone(), min=-epsilon, max=epsilon) + perturbed_images[i].detach().clone()
+                temp_image = torch.clamp(temp_image, 0, 255)
+                
+                outputs = model(temp_image)
+                label = torch.argmax(outputs).item()
+
+                if label == 8:
+                    perturbed_images[i] = temp_image.detach().clone()
+                    break
+    
+    return_images = images.detach().clone()
+    return_images[mask_1] = perturbed_images
+
+    return return_images
+
+
+    
+
+
+    # mask_1 = labels == 1
+    # mask_8 = labels == 8
+    # images_label_8 = images[mask_8]
+    # # chosen_image_8 = images_label_8[torch.randint(len(images_label_8), (1,))].clone()
+    
+
+    # images_to_attack = images[mask_1].detach().clone()
+    # labels_to_attack = labels[mask_1].detach().clone()
+    # perturbed_images = images_to_attack.detach().clone()
+    # target_labels = torch.full_like(labels_to_attack, target_class)
+
+    # # perturbed_images = perturbed_images + chosen_image_8
+    # perturbed_images = torch.clamp(perturbed_images, 0, 255)
+
+    # m=torch.zeros(perturbed_images.shape)
+    # v=torch.zeros(perturbed_images.shape)
+
+    # for i in range(iters): # PGD
+    #     perturbed_images.requires_grad = True
+    #     outputs = model(perturbed_images)
+    #     loss = F.cross_entropy(outputs, target_labels)
+    #     model.zero_grad()
+    #     loss.backward()
+    #     grads = perturbed_images.grad
+    #     with torch.no_grad():
+    #         t=i+1
+    #         m=0.9*m+0.1*grads
+    #         v=0.999*v+0.001*grads*grads
+    #         mhat=m/(1.0 - 0.9**t)
+    #         vhat=v/(1.0 - 0.999**t)
+    #         grads=mhat / (torch.sqrt(vhat) + 1e-8)
+
+    #         perturbed_images = perturbed_images - alpha * grads.sign()
+    #         perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon, max=images_to_attack+epsilon)
+    #         perturbed_images = torch.clamp(perturbed_images, 0, 255)
+    #         perturbed_images = perturbed_images.detach().clone()
+
+    # perturbed_images.requires_grad = False
+    # return_images = images.detach().clone()
+    # return_images[mask_1] = perturbed_images
+
+    return return_images
 
 #evaluate performance of attacks
 	#TODO
 
-# models = [modelA, modelB]
 models = [modelA, modelB]
+# models = [modelB]
+# model_names = ['Model B']
 model_names = ['Model A', 'Model B']
-# model_names = ['Model A', 'Model B']
+# attacks = [targeted_attack_improved]
 attacks = [untargeted_attack, targeted_attack, targeted_attack_improved]
-# attacks = [untargeted_attack, targeted_attack, targeted_attack_improved]
+# attack_names = ['Improved Targeted Attack']
 attack_names = ['Untargeted Attack', 'Targeted Attack', 'Improved Targeted Attack']
-# attack_names = ['Untargeted Attack', 'Targeted Attack', 'Improved Targeted Attack']
-epsilons = [i for i in range(1, 17)]
-epsilons = [1,2,4,8,16]
+# epsilons = [i for i in range(1, 17)]
+epsilons = [1,2,4,8,16,32]
+# epsilons = [8,16]
 
 # Placeholder for success rates
 success_rates = np.zeros((len(models), len(attacks), len(epsilons)))
@@ -254,6 +333,7 @@ for i, model in enumerate(models):
             test(model, adv_examples, y_test, 512)
             success_rates[i, j, k] = success_rate
             print(f"Attack Success Rate:{success_rate}")
+            # print(f"Attack Fail Rate:{fail_rate}")
             
     print("\n")
 
@@ -263,9 +343,7 @@ for i in range(len(models)):
     for j in range(len(attacks)):
         plt.plot(epsilons, success_rates[i, j, :], marker='o', label=attack_names[j])
         for x, y in zip(epsilons, success_rates[i, j, :]):
-            # Place the success rate value above each point
-            # The `str(round(y, 2))` rounds the success rate to 2 decimal places for clarity
-            plt.text(x, y, str(round(y, 2)), color="black", ha='center', va='bottom')
+            plt.text(x, y, str(round(y, 4)), color="black", ha='center', va='bottom')
     plt.title(f'Success Rate vs Epsilon for {model_names[i]}')
     plt.xlabel('Epsilon')
     plt.ylabel('Success Rate')
