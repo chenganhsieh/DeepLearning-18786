@@ -45,8 +45,8 @@ def evaluate_attack_success_rate(model, adv_examples, true_labels, target_class=
 
     with torch.no_grad():
         outputs = model(adv_examples)
-    
-    _, predicted_classes = torch.max(outputs, 1)
+
+    pred_prob, predicted_classes = torch.max(nn.Sigmoid()(outputs), 1)
     
     if target_class is None:
         successful_attacks = predicted_classes != true_labels
@@ -183,138 +183,10 @@ def targeted_attack(model, images, labels, target_class, epsilon=2, iters=100, a
     return return_images
 
 
-class Autoencoder(nn.Module):
-    def __init__(self):
-        super(Autoencoder, self).__init__()
-        # 28 - 2*padding // stride + 1
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 16, 3, stride=2, padding=1), # 14
-            nn.ReLU(),
-            nn.Conv2d(16, 32, 3, stride=2, padding=1), # 7
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 7)
-        )
-        
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, 7),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()
-        )
-    
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
-
-class MyNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(784, 784),
-            nn.Tanh(),
-            nn.Linear(784, 784),
-        )
-    def forward(self, x):
-        return self.layers(x)
-    
 #improved targeted attack 
 #you may add parameters as you wish
-def targeted_attack_improved(model, images, labels, target_class, epsilons=[1,2,4,8,16,32], iters=100, alpha=1.0):
+def targeted_attack_improved(model, images, labels, target_class, epsilon=8, iters=100, alpha=1.0):
     model.eval()
-    for param in model.parameters():
-        param.requires_grad = False
-
-    mask_1 = labels == 1
-    images_to_attack = images[mask_1].detach().clone()
-    labels_to_attack = labels[mask_1].detach().clone()
-    perturbed_images = images_to_attack.detach().clone()
-    target_labels = torch.full_like(labels_to_attack, target_class) 
-    
-    batches=np.ceil(len(images_to_attack)/16).astype(int)
-    success=0
-    total_loss=0
-    net = Autoencoder()
-    optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
-    epsilon_large = 16
-    for iter in range(400):
-        total_loss = 0
-        for i in range(batches):
-            net.zero_grad()
-            start_index=i*16
-            end_index=np.minimum((i+1)*16,len(images_to_attack))
-            x_batch=torch.tensor(images_to_attack[start_index:end_index].detach().clone()).float()
-            y_batch=torch.tensor(target_labels[start_index:end_index].detach().clone()).long()
-            perturbed_images = net(x_batch/255)
-            perturbed_images = perturbed_images * 255
-            perturbed_images = torch.clamp(perturbed_images, min=x_batch.detach().clone()-epsilon_large, max=x_batch.detach().clone()+epsilon_large)
-            perturbed_images = torch.clamp(perturbed_images, 0, 255)
-            output = model(perturbed_images)
-            
-            loss = F.cross_entropy(output, y_batch)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-        print(f"Epoch: {iter}: {total_loss / batches}")
-    perturbed_images = images_to_attack.detach().clone()
-    # perturbed_images = images_to_attack.detach().clone().reshape(images_to_attack.shape[0], -1)
-    perturbed_images = net(perturbed_images/255)
-    perturbed_images = perturbed_images * 255
-    # perturbed_images = perturbed_images.reshape(perturbed_images.shape[0], 1,28, 28)
-    perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon_large, max=images_to_attack+epsilon_large)
-    perturbed_images = torch.clamp(perturbed_images, 0, 255)
-    outputs = model(perturbed_images)
-    labels = torch.argmax(outputs, dim=-1)
-    mask = labels == 8
-    success = 100* len(labels[mask]) / len(labels)
-    import pdb
-    pdb.set_trace()
-
-
-    net = Autoencoder()
-    optimizer = torch.optim.Adam(net.parameters(), lr=0.01)
-    epsilon_large = 16
-    for i in range(1000):
-        model.zero_grad()
-        perturbed_images = images_to_attack.detach().clone()
-        # perturbed_images = images_to_attack.detach().clone().reshape(images_to_attack.shape[0], -1)
-        perturbed_images = net(perturbed_images/255)
-        perturbed_images = perturbed_images * 255
-        # perturbed_images = perturbed_images.reshape(perturbed_images.shape[0], 1,28, 28)
-        perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon_large, max=images_to_attack+epsilon_large)
-        perturbed_images = torch.clamp(perturbed_images, 0, 255)
-        output = model(perturbed_images)
-        loss = F.cross_entropy(output, target_labels)
-        print(f"Iters: {i}: {loss}")
-        loss.backward()
-        optimizer.step()
-    perturbed_images = images_to_attack.detach().clone()
-    # perturbed_images = images_to_attack.detach().clone().reshape(images_to_attack.shape[0], -1)
-    perturbed_images = net(perturbed_images/255)
-    perturbed_images = perturbed_images * 255
-    # perturbed_images = perturbed_images.reshape(perturbed_images.shape[0], 1,28, 28)
-    perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon_large, max=images_to_attack+epsilon_large)
-    perturbed_images = torch.clamp(perturbed_images, 0, 255)
-    outputs = model(perturbed_images)
-    labels = torch.argmax(outputs, dim=-1)
-    mask = labels == 8
-    success = (labels[mask].sum() / len(labels)).item()
-    import pdb
-    pdb.set_trace()
-    
-
-    loss = F.cross_entropy(outputs, torch.tensor([8]))
-    loss.backward()            
-    optimizer.step()
-    label = torch.argmax(outputs).item()
-    
-
-
-
     mask_1 = labels == 1
 
     images_to_attack = images[mask_1].detach().clone()
@@ -322,14 +194,11 @@ def targeted_attack_improved(model, images, labels, target_class, epsilons=[1,2,
     perturbed_images = images_to_attack.detach().clone()
     target_labels = torch.full_like(labels_to_attack, target_class)
 
-    # perturbed_images = perturbed_images + chosen_image_8
-    perturbed_images = torch.clamp(perturbed_images, 0, 255)
-
     m=torch.zeros(perturbed_images.shape)
     v=torch.zeros(perturbed_images.shape)
-    epsilon_large = 128
 
-    for i in range(iters): # PGD
+
+    for i in range(200): # PGD
         perturbed_images.requires_grad = True
         outputs = model(perturbed_images)
         loss = F.cross_entropy(outputs, target_labels)
@@ -345,7 +214,7 @@ def targeted_attack_improved(model, images, labels, target_class, epsilons=[1,2,
             grads=mhat / (torch.sqrt(vhat) + 1e-8)
 
             perturbed_images = perturbed_images - alpha * grads.sign()
-            perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon_large, max=images_to_attack+epsilon_large)
+            perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon, max=images_to_attack+epsilon)
             perturbed_images = torch.clamp(perturbed_images, 0, 255)
             perturbed_images = perturbed_images.detach().clone()
 
@@ -353,129 +222,22 @@ def targeted_attack_improved(model, images, labels, target_class, epsilons=[1,2,
     return_images = images.detach().clone()
     return_images[mask_1] = perturbed_images
 
-    # mask_1 = labels == 1
-    # images_to_attack = images[mask_1].detach().clone()
-    # labels_to_attack = labels[mask_1].detach().clone()
-    # perturbed_images = images_to_attack.detach().clone()
-    # perturbations = []
-    # labels = []
-    # epsilon_large = 128
-    # attack_perturbation = {}
-    # for i in range(images_to_attack.shape[0]):
-    #     print(f"Image:{i}")
-    #     image = images_to_attack[i]
-
-    #     perturbation = torch.zeros((1, images.shape[1], images.shape[2], images.shape[3]), requires_grad=True)
-    #     optimizer = torch.optim.Adam([perturbation], lr=1)
-    #     for _ in range(100):
-    #         optimizer.zero_grad()
-            
-    #         # Apply perturbations within epsilon constraints
-    #         perturbed_images = image + perturbation
-    #         perturbed_images = torch.clamp(perturbed_images, 0, 255)
-    #         perturbed_images = torch.clamp(perturbed_images - image, min=-epsilon_large, max=epsilon_large) + image
-            
-    #         outputs = model(perturbed_images)
-    #         loss = F.cross_entropy(outputs, torch.tensor([8]))
-    #         loss.backward()            
-    #         optimizer.step()
-    #         label = torch.argmax(outputs).item()
-
-    #         # Project the perturbations to ensure they are within the epsilon ball after update
-    #         perturbation.data = torch.clamp(perturbation, min=-epsilon_large, max=epsilon_large)
-    #         if label == 8:
-    #             attack_perturbation[i] = perturbation.detach().clone()
-    #             break
-    # attack_success_amt = len(attack_perturbation)
-    # print(f"Epsilon:{epsilon_large} -> {attack_success_amt}")
-
-    return_images_list = []
-    for epsilon in epsilons:
-        print(f"Improved target attack: Running on epsilon:{epsilon}")
-        perturbed_images = images_to_attack.detach().clone()
-        for i in range(perturbed_images.shape[0]):
-            temp_image = perturbed_images[i].detach().clone()
-            if i in attack_perturbation:
-                perturbation = attack_perturbation[i]
-                for _ in range(iters):
-                    temp_image = temp_image + perturbation * 0.1
-                    temp_image = torch.clamp(temp_image - perturbed_images[i].detach().clone(), min=-epsilon, max=epsilon) + perturbed_images[i].detach().clone()
-                    temp_image = torch.clamp(temp_image, 0, 255)
-                    
-                    outputs = model(temp_image)
-                    label = torch.argmax(outputs).item()
-
-                    if label == 8:
-                        perturbed_images[i] = temp_image.detach().clone()
-                        break
-        
-        return_images = images.detach().clone()
-        return_images[mask_1] = perturbed_images
-        return_images_list.append(return_images)
-
-    return return_images_list
-
-
-    
-
-
-    # mask_1 = labels == 1
-    # mask_8 = labels == 8
-    # images_label_8 = images[mask_8]
-    # # chosen_image_8 = images_label_8[torch.randint(len(images_label_8), (1,))].clone()
-    
-
-    # images_to_attack = images[mask_1].detach().clone()
-    # labels_to_attack = labels[mask_1].detach().clone()
-    # perturbed_images = images_to_attack.detach().clone()
-    # target_labels = torch.full_like(labels_to_attack, target_class)
-
-    # # perturbed_images = perturbed_images + chosen_image_8
-    # perturbed_images = torch.clamp(perturbed_images, 0, 255)
-
-    # m=torch.zeros(perturbed_images.shape)
-    # v=torch.zeros(perturbed_images.shape)
-
-    # for i in range(iters): # PGD
-    #     perturbed_images.requires_grad = True
-    #     outputs = model(perturbed_images)
-    #     loss = F.cross_entropy(outputs, target_labels)
-    #     model.zero_grad()
-    #     loss.backward()
-    #     grads = perturbed_images.grad
-    #     with torch.no_grad():
-    #         t=i+1
-    #         m=0.9*m+0.1*grads
-    #         v=0.999*v+0.001*grads*grads
-    #         mhat=m/(1.0 - 0.9**t)
-    #         vhat=v/(1.0 - 0.999**t)
-    #         grads=mhat / (torch.sqrt(vhat) + 1e-8)
-
-    #         perturbed_images = perturbed_images - alpha * grads.sign()
-    #         perturbed_images = torch.clamp(perturbed_images, min=images_to_attack-epsilon, max=images_to_attack+epsilon)
-    #         perturbed_images = torch.clamp(perturbed_images, 0, 255)
-    #         perturbed_images = perturbed_images.detach().clone()
-
-    # perturbed_images.requires_grad = False
-    # return_images = images.detach().clone()
-    # return_images[mask_1] = perturbed_images
-
     return return_images
 
 #evaluate performance of attacks
 	#TODO
 
-# models = [modelA, modelB]
-models = [modelA]
-model_names = ['Model B']
-# model_names = ['Model A', 'Model B']
+models = [modelA, modelB]
+# models = [modelB]
+# model_names = ['Model B']
+model_names = ['Model A', 'Model B']
 attacks = [targeted_attack_improved]
 # attacks = [untargeted_attack, targeted_attack, targeted_attack_improved]
 attack_names = ['Improved Targeted Attack']
 # attack_names = ['Untargeted Attack', 'Targeted Attack', 'Improved Targeted Attack']
-# epsilons = [i for i in range(1, 17)]
-# epsilons = [4,8]
-epsilons = [16]
+# epsilons = [i for i in range(1, 33)]
+epsilons = [8,16]
+# epsilons = [16]
 
 # Placeholder for success rates
 success_rates = np.zeros((len(models), len(attacks), len(epsilons)))
@@ -484,7 +246,7 @@ for i, model in enumerate(models):
     print(f"Model:{model_names[i]}")
     for j, attack in enumerate(attacks):
         print(f"Attack:{attack_names[j]}")
-        if attack_names[j] != "Improved Targeted Attack":
+        if attack_names[j] != "": #Improved Targeted Attack
             for k, epsilon in enumerate(epsilons):
                 print(f"Epsilon: {epsilon}")
                 if attack_names[j] != "Untargeted Attack":
@@ -503,7 +265,7 @@ for i, model in enumerate(models):
                 success_rates[i, j, k] = success_rate
                 print(f"Attack Success Rate:{success_rate}")
         else:
-            all_adv_examples = attack(model=model, images=x_test_tensor, labels=y_test_tensor, target_class= 8, epsilons=epsilons)
+            all_adv_examples = attack(model=model, images=x_test_tensor, labels=y_test_tensor, target_class= 8, epsilon=epsilons)
             for k, epsilon in enumerate(epsilons):
                 adv_examples = all_adv_examples[k]
                 success_rate = evaluate_attack_success_rate(model, adv_examples, y_test_tensor, target_class=8, attack_class=1)

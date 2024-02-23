@@ -72,7 +72,7 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
         pred = output.argmax(dim=1, keepdim=True)
         correct += pred.eq(target.view_as(pred)).sum().item()
     
-    total_loss /= len(train_loader.dataset)
+    total_loss /= len(train_loader)
     accuracy = 100. * correct / len(train_loader.dataset)
     print(f'Train Epoch {epoch}: Loss: {total_loss:.4f}, Accuracy: {accuracy:.2f}%')
     return accuracy, total_loss 
@@ -89,7 +89,7 @@ def validate(model, device, validation_loader, criterion, epoch):
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
     
-    total_loss /= len(validation_loader.dataset)
+    total_loss /= len(validation_loader)
     accuracy = 100. * correct / len(validation_loader.dataset)
     print(f'Validation: Loss {epoch}: {total_loss:.4f}, Accuracy: {accuracy:.2f}% \n')
     return accuracy, total_loss

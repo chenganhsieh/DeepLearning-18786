@@ -39,25 +39,34 @@ def MyFConv2D(input, weight, bias=None, stride=1, padding=0):
     # ----- TODO -----
     output_height = ((input_height + 2 * padding - kernel_height) // stride) + 1
     output_width  = ((input_width + 2 * padding - kernel_width) // stride) + 1
-    # x_conv_out    = torch.zeros((batch_size, out_channels, output_height, output_width))
     
     # ref: https://stackoverflow.com/questions/53972159/how-does-pytorchs-fold-and-unfold-work
-    x_unfolded = F.unfold(input, kernel_size=(kernel_height, kernel_width), stride=stride, padding=padding)
+    # x_unfolded = F.unfold(input, kernel_size=(kernel_height, kernel_width), stride=stride, padding=padding)
+    # weight_reshaped = weight.view(out_channels, -1)
+    # output_2d = weight_reshaped @ x_unfolded
+    # if bias is not None:
+    #     output_2d += bias.view(-1, 1)
+    # x_conv_out = output_2d.view(batch_size, out_channels, output_height, output_width)
+
+    ## Convolution process
+    ## Feel free to use for loop 
+    # revise code without using F.unfold
+    x_pad = torch.nn.functional.pad(input, (padding, padding, padding, padding), mode='constant', value=0).to(input.device)
+    _,_,input_padded_height, input_padded_width = x_pad.shape
+    x_unfolded = torch.zeros((input.shape[0], input.shape[1] * kernel_height * kernel_width, output_height * output_width)).to(input.device)
+    patch_idx = 0
+    for i in range(0, input_padded_height - kernel_height + 1, stride):
+        for j in range(0, input_padded_width - kernel_width + 1, stride):
+            patch = x_pad[:, :, i:i+kernel_height, j:j+kernel_width]
+            x_unfolded[:, :, patch_idx] = patch.reshape(input.shape[0], -1)
+            patch_idx += 1
+    
     weight_reshaped = weight.view(out_channels, -1)
     output_2d = weight_reshaped @ x_unfolded
     if bias is not None:
         output_2d += bias.view(-1, 1)
     x_conv_out = output_2d.view(batch_size, out_channels, output_height, output_width)
 
-
-
-    ## Convolution process
-    ## Feel free to use for loop 
-    # for b in range(batch_size):
-    #     for k in range(out_channels):
-    #         for i in range(0, output_height):
-    #             for j in range(0, output_width):
-    #                 x_conv_out[b, k, i, j] = torch.sum(x_pad[b, :, i*stride:i*stride+kernel_height, j*stride:j*stride+kernel_width] * weight[k, :, :, :]) + (bias[k] if bias is not None else 0)
     return x_conv_out
       
 
@@ -169,24 +178,15 @@ class MyMaxPool2D(nn.Module):
         ## Maxpooling process
         ## Feel free to use for loop
         # ----- TODO -----
-        import pdb
-        pdb.set_trace()
-        x_unfolded = F.unfold(x, kernel_size=(self.kernel_size, self.kernel_size), stride=self.stride)
-        x_unfolded = x.unfold(2, self.kernel_size, self.stride).unfold(3, self.kernel_size, self.stride)
-        self.x_pool_out, _ = x_unfolded.reshape(self.batch_size, self.output_channels, self.output_height, self.output_width, -1).max(dim=-1)
+        # revise code without using F.unfold
+        x_unfolded =  torch.zeros((x.shape[0], x.shape[1], x.shape[2] // self.stride, x.shape[3] // self.stride, self.kernel_size ** 2)).to(x.device)
+        for i in range(0, x.shape[2], self.stride):
+            for j in range(0, x.shape[3], self.stride):
+                x_unfolded[:,:, i // self.stride, j //self.stride, :] = x[:,:,i:i+self.stride, j:j+self.stride].reshape(x.shape[0],x.shape[1],self.kernel_size**2)
 
-        # import time
-        # start_time = time.time()
-        # for b in range(self.batch_size):
-        #     for c in range(self.channel):
-        #         for i in range(0, self.output_height):
-        #             for j in range(0, self.output_width):
-        #                 h_start = i * self.stride
-        #                 w_start = j * self.stride
-        #                 h_end = h_start + self.kernel_size
-        #                 w_end = w_start + self.kernel_size
-        #                 self.x_pool_out[b, c, i, j] = torch.max(x[b, c, h_start:h_end, w_start:w_end])
-        # print("--- %s seconds ---" % (time.time() - start_time))
+        self.x_pool_out, _ = x_unfolded.max(dim=-1)
+        # x_unfolded = F.unfold(x, kernel_size=(self.kernel_size, self.kernel_size), stride=self.stride)
+        # x_unfolded = x.unfold(2, self.kernel_size, self.stride).unfold(3, self.kernel_size, self.stride)
         
         return self.x_pool_out
 
