@@ -1,5 +1,7 @@
 from typing import List
 import numpy as np
+import math
+from collections import Counter
 
 def bleu_score(predicted: List[int], target: List[int], N: int) -> float:
     """
@@ -10,25 +12,36 @@ def bleu_score(predicted: List[int], target: List[int], N: int) -> float:
     """
     if len(predicted) < N or len(target) < N:
         # TODO
-        pass
+        return 0.0
     
     def C(y, g):
         # TODO how many times does n-gram g appear in y?
-        pass
-
-    geo_mean = 1
-    for n in range(1, N+1):
-        grams = set() # unique n-grams
-        for i in range(len(predicted)-n+1):
-            # TODO add to grams
-            pass
-        
-        numerator = None # TODO numerator of clipped precision
-        denominator = None # TODO denominator of clipped precision
-
-        geo_mean *= (numerator/denominator)**(1/N)
+        y_counter = Counter([tuple(y[i:i+len(g)]) for i in range(len(y)-len(g)+1)])
+        return y_counter[g]
     
-    brevity_penalty = None # TODO
+    def clipped_precision(predicted, target, n):
+        predicted_ngrams = [tuple(predicted[i:i+n]) for i in range(len(predicted)-n+1)]
+        target_ngrams = [tuple(target[i:i+n]) for i in range(len(target)-n+1)]
+        
+        predicted_ngram_counts = Counter(predicted_ngrams)
+        target_ngram_counts = Counter(target_ngrams)
+
+        clipped_counts = {ngram: min(count, target_ngram_counts[ngram]) for ngram, count in predicted_ngram_counts.items()}
+
+        numerator = sum(clipped_counts.values())
+        denominator = len(predicted) - n + 1
+
+        return numerator, denominator
+
+    geo_mean = 1.0
+    for n in range(1, N+1):
+        numerator, denominator = clipped_precision(predicted, target, n)
+        if denominator == 0:
+            return 0.0
+        geo_mean *= (numerator/denominator)
+    geo_mean = geo_mean **(1/N)
+    
+    brevity_penalty =  min(1,  math.exp(1 - len(target) / len(predicted))) # TODO
     return brevity_penalty * geo_mean
 
 
