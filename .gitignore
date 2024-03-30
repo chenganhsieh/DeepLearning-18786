@@ -1,0 +1,4 @@
+*.zip
+*.tar
+data/
+__pycache__/
